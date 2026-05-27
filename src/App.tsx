@@ -31,8 +31,25 @@ import { ScriptNode } from './components/ScriptNode';
 import { VoiceNode } from './components/VoiceNode';
 import { WorkflowSidebar } from './components/WorkflowSidebar';
 import { ApiSettingsModal } from './components/settings/ApiSettingsModal';
+import { UpdateModal } from './components/update/UpdateModal';
+import { UpdateStatusButton } from './components/update/UpdateStatusButton';
+import {
+  checkForUpdates,
+  downloadUpdate,
+  getUpdateStatus,
+  installUpdate,
+  onUpdateStatus,
+} from './services/updateClient';
+import type { UpdateStatus } from './types/update';
 
 const workflowVersion = '1.0.0';
+const initialUpdateStatus: UpdateStatus = {
+  status: 'idle',
+  currentVersion: '1.0.0',
+  message: 'Sẵn sàng kiểm tra cập nhật.',
+  canDownload: false,
+  canInstall: false,
+};
 
 function createNode(type: NodeType, index: number): Node {
   const id = `${type}-${Date.now()}`;
@@ -72,6 +89,8 @@ function FlowEditor() {
   const [status, setStatus] = useState('Đã nạp workflow mẫu từ workflow_1779854289551.json');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [providers, setProviders] = useState<VideoProviderDefinition[]>([]);
+  const [updateModalOpen, setUpdateModalOpen] = useState(false);
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus>(initialUpdateStatus);
 
   const refreshProviders = useCallback(async () => {
     if (!window.desktopAPI) return;
@@ -86,6 +105,24 @@ function FlowEditor() {
   useEffect(() => {
     void refreshProviders();
   }, [refreshProviders]);
+
+  useEffect(() => {
+    if (!window.desktopAPI?.update) return;
+    void getUpdateStatus().then(setUpdateStatus).catch(() => {
+      setUpdateStatus({
+        ...initialUpdateStatus,
+        status: 'error',
+        message: 'Không tải được trạng thái cập nhật.',
+      });
+    });
+
+    return onUpdateStatus((nextStatus) => {
+      setUpdateStatus(nextStatus);
+      if (['available', 'downloaded', 'error', 'blocked', 'unsupported-portable'].includes(nextStatus.status)) {
+        setUpdateModalOpen(true);
+      }
+    });
+  }, []);
 
   const openSettings = useCallback(() => setSettingsOpen(true), []);
 
@@ -165,6 +202,46 @@ function FlowEditor() {
     setStatus('Đã reset workflow');
   };
 
+  const runUpdateCheck = async () => {
+    setUpdateModalOpen(true);
+    try {
+      setUpdateStatus(await checkForUpdates());
+    } catch (error) {
+      setUpdateStatus({
+        ...updateStatus,
+        status: 'error',
+        message: 'Không thể kiểm tra cập nhật.',
+        errorMessage: error instanceof Error ? error.message : 'Lỗi không xác định.',
+      });
+    }
+  };
+
+  const runUpdateDownload = async () => {
+    try {
+      setUpdateStatus(await downloadUpdate());
+    } catch (error) {
+      setUpdateStatus({
+        ...updateStatus,
+        status: 'error',
+        message: 'Không thể tải bản cập nhật.',
+        errorMessage: error instanceof Error ? error.message : 'Lỗi không xác định.',
+      });
+    }
+  };
+
+  const runUpdateInstall = async () => {
+    try {
+      setUpdateStatus(await installUpdate());
+    } catch (error) {
+      setUpdateStatus({
+        ...updateStatus,
+        status: 'error',
+        message: 'Không thể cài bản cập nhật.',
+        errorMessage: error instanceof Error ? error.message : 'Lỗi không xác định.',
+      });
+    }
+  };
+
   const renderAllScenes = async () => {
     const sceneNodes = nodes.filter((node) => node.type === 'scene');
     const scriptNode = nodes.find((node) => node.type === 'script');
@@ -241,6 +318,7 @@ function FlowEditor() {
               <KeyRound size={17} />
               <span>Cấu hình API</span>
             </button>
+            <UpdateStatusButton status={updateStatus} onClick={runUpdateCheck} />
             <button className="toolbar-button ghost" onClick={renderAllScenes} title="Render tất cả scene theo workflow" type="button">
               <PlayCircle size={17} />
               <span>Render tất cả</span>
@@ -285,6 +363,14 @@ function FlowEditor() {
           void refreshProviders();
         }}
         onProvidersChanged={setProviders}
+      />
+      <UpdateModal
+        open={updateModalOpen}
+        status={updateStatus}
+        onClose={() => setUpdateModalOpen(false)}
+        onCheck={runUpdateCheck}
+        onDownload={runUpdateDownload}
+        onInstall={runUpdateInstall}
       />
     </div>
   );

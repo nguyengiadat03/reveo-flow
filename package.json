@@ -1,19 +1,26 @@
 {
   "name": "reveo-flow",
-  "version": "0.3.0",
+  "version": "1.0.0",
   "private": true,
   "description": "FlowGraph Video Workflow desktop app",
   "author": "Rocket Global",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nguyengiadat03/reveo-flow.git"
+  },
   "main": "electron/main.js",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && set ELECTRON_RUN_AS_NODE=&& electron .\"",
     "dist": "npm run build && electron-builder --win nsis",
-    "dist:portable": "npm run build && electron-builder --win portable"
+    "dist:portable": "npm run build && electron-builder --win portable",
+    "publish:win": "npm run build && electron-builder --win nsis --publish always",
+    "release:win": "npm run dist"
   },
   "dependencies": {
     "@xyflow/react": "^12.8.4",
+    "electron-updater": "^6.8.3",
     "ffmpeg-static": "^5.3.0",
     "lucide-react": "^0.468.0",
     "react": "^18.3.1",
@@ -33,7 +40,7 @@
   },
   "build": {
     "appId": "com.rocketglobal.flowgraph",
-    "productName": "FlowGraph Video Workflow",
+    "productName": "Video Flow",
     "directories": {
       "output": "release"
     },
@@ -43,6 +50,22 @@
     "files": [
       "dist/**/*",
       "electron/**/*",
+      "node_modules/electron-updater/**/*",
+      "node_modules/electron-updater/node_modules/**/*",
+      "node_modules/builder-util-runtime/**/*",
+      "node_modules/fs-extra/**/*",
+      "node_modules/graceful-fs/**/*",
+      "node_modules/jsonfile/**/*",
+      "node_modules/universalify/**/*",
+      "node_modules/js-yaml/**/*",
+      "node_modules/argparse/**/*",
+      "node_modules/lazy-val/**/*",
+      "node_modules/lodash.escaperegexp/**/*",
+      "node_modules/lodash.isequal/**/*",
+      "node_modules/tiny-typed-emitter/**/*",
+      "node_modules/semver/**/*",
+      "node_modules/debug/**/*",
+      "node_modules/sax/**/*",
       "node_modules/ffmpeg-static/**/*",
       "package.json"
     ],
@@ -54,11 +77,23 @@
       ]
     },
     "nsis": {
+      "artifactName": "Video-Flow-Setup-${version}.${ext}",
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true
-    }
+    },
+    "portable": {
+      "artifactName": "Video-Flow-Portable-${version}.${ext}"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "nguyengiadat03",
+        "repo": "reveo-flow",
+        "releaseType": "release"
+      }
+    ]
   }
 }

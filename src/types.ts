@@ -1,4 +1,5 @@
 import type { Edge, Node } from '@xyflow/react';
+import type { UpdateStatus } from './types/update';
 
 export type NodeType =
   | 'character'
@@ -106,4 +107,13 @@ export interface DesktopAPI {
   removeProviderKey: (providerId: string) => Promise<any>;
   testProviderConnection: (options: unknown) => Promise<any>;
   setDefaultProvider: (providerId: string) => Promise<string>;
+  update: {
+    checkForUpdates: () => Promise<UpdateStatus>;
+    downloadUpdate: () => Promise<UpdateStatus>;
+    installUpdate: () => Promise<UpdateStatus>;
+    getUpdateStatus: () => Promise<UpdateStatus>;
+    setBlocked: (reason: string) => Promise<UpdateStatus>;
+    clearBlocked: () => Promise<UpdateStatus>;
+    onUpdateStatus: (callback: (status: UpdateStatus) => void) => () => void;
+  };
 }

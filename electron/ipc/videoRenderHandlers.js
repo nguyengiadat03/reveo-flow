@@ -1,6 +1,7 @@
 const apiKeyStore = require('../services/apiKeyStore');
 const { getProviderDefinition } = require('../services/providerRegistry');
 const { getProvider } = require('../services/videoProviders');
+const updateService = require('../services/updateService');
 
 function asObject(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -55,13 +56,18 @@ function registerVideoRenderHandlers(ipcMain) {
       throw new Error(`Thiếu khóa API cho ${definition.shortName || definition.name}. Hãy mở Cấu hình API.`);
     }
 
-    return provider.renderVideo({
-      ...request,
-      providerId,
-      modelName: request.modelName || privateConfig.modelName || definition.models?.[0]?.id || '',
-      apiKey,
-      providerConfig: privateConfig
-    });
+    updateService.setUpdateBlocked('Đang render video');
+    try {
+      return await provider.renderVideo({
+        ...request,
+        providerId,
+        modelName: request.modelName || privateConfig.modelName || definition.models?.[0]?.id || '',
+        apiKey,
+        providerConfig: privateConfig
+      });
+    } finally {
+      updateService.clearUpdateBlocked();
+    }
   });
 
   ipcMain.handle('video:getRenderStatus', async () => {

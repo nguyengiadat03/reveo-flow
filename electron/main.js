@@ -2,7 +2,9 @@ const { app, BrowserWindow, dialog, ipcMain } = require('electron');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { registerApiSettingsHandlers } = require('./ipc/apiSettingsHandlers');
+const { registerUpdateHandlers } = require('./ipc/updateHandlers');
 const { registerVideoRenderHandlers } = require('./ipc/videoRenderHandlers');
+const updateService = require('./services/updateService');
 
 const isDev = !app.isPackaged;
 
@@ -31,7 +33,7 @@ function createWindow() {
     height: 900,
     minWidth: 1100,
     minHeight: 720,
-    title: 'FlowGraph Video Workflow',
+    title: 'Video Flow',
     backgroundColor: '#08080b',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -47,11 +49,14 @@ function createWindow() {
   } else {
     win.loadFile(path.join(__dirname, '../dist/index.html'));
   }
+
+  return win;
 }
 
 app.whenReady().then(() => {
   registerIpc();
-  createWindow();
+  const mainWindow = createWindow();
+  updateService.initAutoUpdater(mainWindow);
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -76,6 +81,7 @@ function getMediaFilters(filter) {
 
 function registerIpc() {
   registerApiSettingsHandlers(ipcMain);
+  registerUpdateHandlers(ipcMain);
   registerVideoRenderHandlers(ipcMain);
 
   ipcMain.handle('workflow:save', async (_event, data, defaultName) => {
