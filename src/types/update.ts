@@ -21,4 +21,20 @@ export interface UpdateStatus {
   canInstall?: boolean;
   canDownload?: boolean;
   blockedReason?: string;
+  channel?: string;
+}
+
+export interface UpdateDiagnostics {
+  appId: string;
+  productName: string;
+  currentVersion: string;
+  packaged: boolean;
+  mockMode: boolean;
+  portable: boolean;
+  channel: string;
+  publishConfigured: boolean;
+  publishProvider: string;
+  publishOwner: string;
+  publishRepo: string;
+  status: UpdateStatus;
 }

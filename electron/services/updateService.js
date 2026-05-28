@@ -1,9 +1,12 @@
 const { app } = require('electron');
 const { autoUpdater } = require('electron-updater');
+const packageJson = require('../../package.json');
+const logger = require('./logger');
 
 let mainWindow = null;
 let blockedReason = '';
 let downloadTimer = null;
+let listenersRegistered = false;
 
 const state = {
   status: 'idle',
@@ -15,15 +18,27 @@ const state = {
   isPortable: false,
   canInstall: false,
   canDownload: false,
-  blockedReason: ''
+  blockedReason: '',
+  channel: 'GitHub Releases'
 };
+
+function safeSendToRenderer(window, channel, payload) {
+  try {
+    if (!window || window.isDestroyed() || window.webContents.isDestroyed()) return false;
+    window.webContents.send(channel, payload);
+    return true;
+  } catch (error) {
+    logger.warn('update', 'Không thể gửi trạng thái update tới renderer.', error);
+    return false;
+  }
+}
 
 function isDevMode() {
   return !app.isPackaged;
 }
 
 function isMockMode() {
-  return process.env.ELECTRON_MOCK_UPDATE === 'true';
+  return process.env.ELECTRON_MOCK_UPDATE === 'true' || process.env.VITE_MOCK_UPDATE === 'true';
 }
 
 function isPortableRuntime() {
@@ -34,28 +49,67 @@ function isPortableRuntime() {
   );
 }
 
+function getPublishConfig() {
+  const publish = packageJson.build?.publish;
+  return Array.isArray(publish) ? publish[0] : publish || null;
+}
+
+function getChannel() {
+  if (isMockMode()) return 'Dev Mock';
+  const publish = getPublishConfig();
+  if (!publish) return 'Chưa cấu hình';
+  if (publish.provider === 'github') return `GitHub Releases (${publish.owner}/${publish.repo})`;
+  if (publish.provider === 'generic') return 'Generic Server';
+  return String(publish.provider || 'Unknown');
+}
+
 function toPublicState(patch = {}) {
   return {
     ...state,
     ...patch,
     currentVersion: app.getVersion(),
     isPortable: isPortableRuntime(),
-    blockedReason
+    blockedReason,
+    channel: getChannel()
   };
 }
 
 function emitStatus(patch = {}) {
   Object.assign(state, toPublicState(patch));
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('update:status', state);
-  }
+  safeSendToRenderer(mainWindow, 'update:status', state);
   return state;
 }
 
 function safeMessage(error) {
   if (!error) return 'Không thể kiểm tra cập nhật.';
-  if (typeof error === 'string') return error;
-  return String(error.message || 'Không thể kiểm tra cập nhật.');
+  if (typeof error === 'string') return logger.redact(error);
+  const message = logger.redact(String(error.message || 'Không thể kiểm tra cập nhật.'));
+
+  if (/ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|network/i.test(message)) {
+    return 'Không có kết nối mạng hoặc máy chủ cập nhật không phản hồi.';
+  }
+
+  if (/publish|provider|latest\.yml|404|Cannot find|No published versions/i.test(message)) {
+    return 'Chưa có GitHub Release hợp lệ hoặc thiếu latest.yml.';
+  }
+
+  if (/private|401|403|authentication|authorization/i.test(message)) {
+    return 'Không thể đọc release. Nếu repo private, app người dùng sẽ cần kênh phát hành public hoặc generic server.';
+  }
+
+  return message;
+}
+
+function handleUpdateError(error, message = 'Kiểm tra cập nhật thất bại.') {
+  const errorMessage = safeMessage(error);
+  logger.warn('update', message, errorMessage);
+  return emitStatus({
+    status: 'error',
+    errorMessage,
+    message,
+    canDownload: false,
+    canInstall: false
+  });
 }
 
 function initAutoUpdater(window) {
@@ -63,7 +117,14 @@ function initAutoUpdater(window) {
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
 
+  if (listenersRegistered) {
+    emitStatus();
+    return;
+  }
+  listenersRegistered = true;
+
   autoUpdater.on('checking-for-update', () => {
+    logger.info('update', 'Checking for update.');
     emitStatus({
       status: 'checking',
       message: 'Đang kiểm tra cập nhật...',
@@ -74,6 +135,7 @@ function initAutoUpdater(window) {
   });
 
   autoUpdater.on('update-available', (info) => {
+    logger.info('update', 'Update available.', { version: info?.version });
     emitStatus({
       status: 'available',
       latestVersion: info?.version || '',
@@ -84,6 +146,7 @@ function initAutoUpdater(window) {
   });
 
   autoUpdater.on('update-not-available', (info) => {
+    logger.info('update', 'No update available.', { version: info?.version });
     emitStatus({
       status: 'not-available',
       latestVersion: info?.version || app.getVersion(),
@@ -95,13 +158,7 @@ function initAutoUpdater(window) {
   });
 
   autoUpdater.on('error', (error) => {
-    emitStatus({
-      status: 'error',
-      errorMessage: safeMessage(error),
-      message: 'Kiểm tra cập nhật thất bại.',
-      canDownload: false,
-      canInstall: false
-    });
+    handleUpdateError(error);
   });
 
   autoUpdater.on('download-progress', (progress) => {
@@ -115,6 +172,7 @@ function initAutoUpdater(window) {
   });
 
   autoUpdater.on('update-downloaded', (info) => {
+    logger.info('update', 'Update downloaded.', { version: info?.version });
     emitStatus({
       status: 'downloaded',
       latestVersion: info?.version || state.latestVersion,
@@ -129,7 +187,7 @@ function initAutoUpdater(window) {
     isDevMode() && !isMockMode()
       ? {
           status: 'dev-disabled',
-          message: 'Auto-update bị tắt trong dev mode.',
+          message: 'Auto-update tắt trong dev mode.',
           canDownload: false,
           canInstall: false
         }
@@ -141,7 +199,7 @@ function getUpdateStatus() {
   if (isDevMode() && !isMockMode()) {
     return emitStatus({
       status: 'dev-disabled',
-      message: 'Auto-update bị tắt trong dev mode. Bật ELECTRON_MOCK_UPDATE=true để test UI.',
+      message: 'Auto-update tắt trong dev mode. Bật ELECTRON_MOCK_UPDATE=true để test UI.',
       canDownload: false,
       canInstall: false
     });
@@ -156,6 +214,16 @@ function getUpdateStatus() {
     });
   }
 
+  if (!getPublishConfig() && !isMockMode()) {
+    return emitStatus({
+      status: 'error',
+      message: 'Chưa cấu hình kênh cập nhật.',
+      errorMessage: 'Thiếu build.publish trong package.json.',
+      canDownload: false,
+      canInstall: false
+    });
+  }
+
   return emitStatus();
 }
 
@@ -163,7 +231,7 @@ async function checkForUpdates() {
   if (blockedReason) {
     return emitStatus({
       status: 'blocked',
-      message: `Đang có tác vụ render, cập nhật sẽ được thực hiện sau khi hoàn tất.`,
+      message: 'Đang có tác vụ render, cập nhật sẽ được thực hiện sau khi hoàn tất.',
       canDownload: false,
       canInstall: false
     });
@@ -183,15 +251,10 @@ async function checkForUpdates() {
   }
 
   try {
-    return await autoUpdater.checkForUpdates();
+    await autoUpdater.checkForUpdates();
+    return state;
   } catch (error) {
-    return emitStatus({
-      status: 'error',
-      errorMessage: safeMessage(error),
-      message: 'Kiểm tra cập nhật thất bại.',
-      canDownload: false,
-      canInstall: false
-    });
+    return handleUpdateError(error);
   }
 }
 
@@ -228,19 +291,14 @@ async function downloadUpdate() {
       }
       emitStatus({ status: 'downloading', percent, message: 'Đang tải bản cập nhật (mock)...' });
     }, 350);
-    return getUpdateStatus();
+    return state;
   }
 
   try {
-    return await autoUpdater.downloadUpdate();
+    await autoUpdater.downloadUpdate();
+    return state;
   } catch (error) {
-    return emitStatus({
-      status: 'error',
-      errorMessage: safeMessage(error),
-      message: 'Tải cập nhật thất bại.',
-      canDownload: true,
-      canInstall: false
-    });
+    return handleUpdateError(error, 'Tải cập nhật thất bại.');
   }
 }
 
@@ -262,7 +320,11 @@ function quitAndInstall() {
   }
 
   if (state.status !== 'downloaded') return getUpdateStatus();
-  autoUpdater.quitAndInstall(false, true);
+  try {
+    autoUpdater.quitAndInstall(false, true);
+  } catch (error) {
+    return handleUpdateError(error, 'Không thể cài bản cập nhật.');
+  }
   return state;
 }
 
@@ -284,12 +346,32 @@ function clearUpdateBlocked() {
   });
 }
 
+function getUpdateDiagnostics() {
+  const publish = getPublishConfig();
+  return {
+    appId: packageJson.build?.appId || '',
+    productName: packageJson.build?.productName || app.getName(),
+    currentVersion: app.getVersion(),
+    packaged: app.isPackaged,
+    mockMode: isMockMode(),
+    portable: isPortableRuntime(),
+    channel: getChannel(),
+    publishConfigured: Boolean(publish),
+    publishProvider: publish?.provider || '',
+    publishOwner: publish?.owner || '',
+    publishRepo: publish?.repo || '',
+    status: { ...state }
+  };
+}
+
 module.exports = {
   initAutoUpdater,
   checkForUpdates,
   downloadUpdate,
   quitAndInstall,
   getUpdateStatus,
+  getUpdateDiagnostics,
   setUpdateBlocked,
-  clearUpdateBlocked
+  clearUpdateBlocked,
+  safeSendToRenderer
 };

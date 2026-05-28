@@ -13,7 +13,7 @@ import {
   type Edge,
   type Node,
 } from '@xyflow/react';
-import { FolderOpen, KeyRound, PlayCircle, RotateCcw, Save } from 'lucide-react';
+import { Activity, Cloud, FolderOpen, KeyRound, LogOut, PlayCircle, RotateCcw, Save } from 'lucide-react';
 import { INITIAL_EDGES, INITIAL_NODES } from './constants';
 import { openWorkflowFile, saveWorkflowFile } from './services/fileClient';
 import type { NodeType, WorkflowFile } from './types';
@@ -30,7 +30,10 @@ import { SceneNode } from './components/SceneNode';
 import { ScriptNode } from './components/ScriptNode';
 import { VoiceNode } from './components/VoiceNode';
 import { WorkflowSidebar } from './components/WorkflowSidebar';
+import { CloudWorkflowModal } from './components/cloud/CloudWorkflowModal';
+import { OnboardingShell } from './components/onboarding/OnboardingShell';
 import { ApiSettingsModal } from './components/settings/ApiSettingsModal';
+import { SystemHealthModal } from './components/system/SystemHealthModal';
 import { UpdateModal } from './components/update/UpdateModal';
 import { UpdateStatusButton } from './components/update/UpdateStatusButton';
 import {
@@ -40,6 +43,12 @@ import {
   installUpdate,
   onUpdateStatus,
 } from './services/updateClient';
+import { getDiagnosticLog, runHealthCheck } from './services/systemClient';
+import { getRendererDiagnosticLog, log } from './services/logger';
+import { getAuthStatus, logout, onAuthStatusChanged } from './services/authClient';
+import { listCloudWorkflows, openWorkflowFromCloud, saveWorkflowToCloud } from './services/workflowCloudClient';
+import type { AuthStatus } from './types/auth';
+import type { HealthCheckReport } from './types/health';
 import type { UpdateStatus } from './types/update';
 
 const workflowVersion = '1.0.0';
@@ -49,6 +58,13 @@ const initialUpdateStatus: UpdateStatus = {
   message: 'Sẵn sàng kiểm tra cập nhật.',
   canDownload: false,
   canInstall: false,
+};
+
+const initialAuthStatus: AuthStatus = {
+  status: 'unauthenticated',
+  message: 'Chưa đăng nhập.',
+  profile: null,
+  capabilities: [],
 };
 
 function createNode(type: NodeType, index: number): Node {
@@ -86,11 +102,24 @@ function normalizeWorkflow(workflow: WorkflowFile): WorkflowFile {
 function FlowEditor() {
   const [nodes, setNodes, onNodesChange] = useNodesState(INITIAL_NODES);
   const [edges, setEdges, onEdgesChange] = useEdgesState(INITIAL_EDGES);
-  const [status, setStatus] = useState('Đã nạp workflow mẫu từ workflow_1779854289551.json');
+  const [status, setStatus] = useState('Workflow mẫu đã sẵn sàng');
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [onboardingComplete, setOnboardingComplete] = useState(() => window.localStorage.getItem('video-flow:onboarding-complete') !== null);
   const [providers, setProviders] = useState<VideoProviderDefinition[]>([]);
   const [updateModalOpen, setUpdateModalOpen] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>(initialUpdateStatus);
+  const [healthModalOpen, setHealthModalOpen] = useState(false);
+  const [healthLoading, setHealthLoading] = useState(false);
+  const [healthReport, setHealthReport] = useState<HealthCheckReport | null>(null);
+  const [authStatus, setAuthStatus] = useState<AuthStatus>(initialAuthStatus);
+  const [cloudModalOpen, setCloudModalOpen] = useState(false);
+  const [cloudLoading, setCloudLoading] = useState(false);
+  const [cloudWorkflows, setCloudWorkflows] = useState<any[]>([]);
+
+  const workflowSummary = useMemo(() => ({
+    nodes: nodes.map((node) => ({ id: node.id, type: String(node.type || '') })),
+    edges: edges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target })),
+  }), [nodes, edges]);
 
   const refreshProviders = useCallback(async () => {
     if (!window.desktopAPI) return;
@@ -98,6 +127,7 @@ function FlowEditor() {
       const nextProviders = await listProviders();
       setProviders(nextProviders);
     } catch (error) {
+      log('error', 'provider', error);
       setStatus(error instanceof Error ? error.message : 'Không tải được provider.');
     }
   }, []);
@@ -107,8 +137,15 @@ function FlowEditor() {
   }, [refreshProviders]);
 
   useEffect(() => {
+    if (!window.desktopAPI?.auth) return;
+    void getAuthStatus().then(setAuthStatus).catch((error) => log('warn', 'auth', error));
+    return onAuthStatusChanged(setAuthStatus);
+  }, []);
+
+  useEffect(() => {
     if (!window.desktopAPI?.update) return;
-    void getUpdateStatus().then(setUpdateStatus).catch(() => {
+    void getUpdateStatus().then(setUpdateStatus).catch((error) => {
+      log('error', 'update', error);
       setUpdateStatus({
         ...initialUpdateStatus,
         status: 'error',
@@ -129,9 +166,9 @@ function FlowEditor() {
   const providerStatus = useMemo(() => {
     const defaultProvider = getDefaultProvider(providers);
     if (!defaultProvider) return { label: 'Đang kiểm tra provider', tone: 'muted' };
-    if (defaultProvider.id === 'local-ffmpeg') return { label: 'Backend: Local FFmpeg Ready', tone: 'ok' };
-    if (defaultProvider.configured) return { label: `Provider: ${defaultProvider.shortName} đã cấu hình`, tone: 'ok' };
-    return { label: `Thiếu API Key: ${defaultProvider.shortName}`, tone: 'warning' };
+    if (defaultProvider.id === 'local-ffmpeg') return { label: 'Local mock sẵn sàng', tone: 'ok' };
+    if (defaultProvider.configured) return { label: `${defaultProvider.shortName} sẵn sàng`, tone: 'ok' };
+    return { label: `Thiếu API key: ${defaultProvider.shortName}`, tone: 'warning' };
   }, [providers]);
 
   const nodeTypes = useMemo(
@@ -192,6 +229,7 @@ function FlowEditor() {
       setEdges(normalized.edges);
       setStatus(`Đã mở workflow ${new Date(normalized.timestamp || Date.now()).toLocaleString('vi-VN')}`);
     } catch (error) {
+      log('error', 'workflow', error);
       setStatus(error instanceof Error ? error.message : 'Không mở được workflow');
     }
   };
@@ -202,11 +240,70 @@ function FlowEditor() {
     setStatus('Đã reset workflow');
   };
 
+  const refreshCloudWorkflows = async () => {
+    if (authStatus.status !== 'authenticated') {
+      setStatus('Bạn cần đăng nhập Google để dùng Workflow Cloud');
+      return;
+    }
+    setCloudLoading(true);
+    try {
+      setCloudWorkflows(await listCloudWorkflows());
+    } catch (error) {
+      log('error', 'workflow', error);
+      setStatus(error instanceof Error ? error.message : 'Không tải được workflow cloud');
+    } finally {
+      setCloudLoading(false);
+    }
+  };
+
+  const saveCloudWorkflow = async (name: string) => {
+    setCloudLoading(true);
+    try {
+      const workflow: WorkflowFile = { nodes, edges, version: workflowVersion, timestamp: Date.now() };
+      await saveWorkflowToCloud(name, workflow);
+      setStatus('Đã lưu workflow lên Supabase');
+      await refreshCloudWorkflows();
+    } catch (error) {
+      log('error', 'workflow', error);
+      setStatus(error instanceof Error ? error.message : 'Không lưu được workflow cloud');
+    } finally {
+      setCloudLoading(false);
+    }
+  };
+
+  const openCloudWorkflow = async (workflowId: string) => {
+    setCloudLoading(true);
+    try {
+      const workflow = normalizeWorkflow(await openWorkflowFromCloud(workflowId));
+      setNodes(workflow.nodes);
+      setEdges(workflow.edges);
+      setStatus('Đã mở workflow từ Supabase');
+      setCloudModalOpen(false);
+    } catch (error) {
+      log('error', 'workflow', error);
+      setStatus(error instanceof Error ? error.message : 'Không mở được workflow cloud');
+    } finally {
+      setCloudLoading(false);
+    }
+  };
+
+  const runLogout = async () => {
+    try {
+      setAuthStatus(await logout());
+      window.localStorage.removeItem('video-flow:onboarding-complete');
+      setStatus('Đã đăng xuất. Workflow local vẫn được giữ.');
+    } catch (error) {
+      log('error', 'auth', error);
+      setStatus(error instanceof Error ? error.message : 'Đăng xuất thất bại');
+    }
+  };
+
   const runUpdateCheck = async () => {
     setUpdateModalOpen(true);
     try {
       setUpdateStatus(await checkForUpdates());
     } catch (error) {
+      log('error', 'update', error);
       setUpdateStatus({
         ...updateStatus,
         status: 'error',
@@ -220,6 +317,7 @@ function FlowEditor() {
     try {
       setUpdateStatus(await downloadUpdate());
     } catch (error) {
+      log('error', 'update', error);
       setUpdateStatus({
         ...updateStatus,
         status: 'error',
@@ -233,6 +331,7 @@ function FlowEditor() {
     try {
       setUpdateStatus(await installUpdate());
     } catch (error) {
+      log('error', 'update', error);
       setUpdateStatus({
         ...updateStatus,
         status: 'error',
@@ -240,6 +339,43 @@ function FlowEditor() {
         errorMessage: error instanceof Error ? error.message : 'Lỗi không xác định.',
       });
     }
+  };
+
+  const runSystemHealthCheck = async () => {
+    setHealthModalOpen(true);
+    setHealthLoading(true);
+    try {
+      setHealthReport(await runHealthCheck({ workflow: workflowSummary }));
+    } catch (error) {
+      log('error', 'health', error);
+      setHealthReport({
+        generatedAt: new Date().toISOString(),
+        durationMs: 0,
+        checks: [{
+          id: 'health-runner',
+          group: 'System Health Check',
+          label: 'Chạy kiểm tra hệ thống',
+          status: 'fail',
+          message: error instanceof Error ? error.message : 'Không thể chạy kiểm tra hệ thống.',
+          suggestedFix: 'Khởi động lại app hoặc kiểm tra Electron IPC.',
+        }],
+      });
+    } finally {
+      setHealthLoading(false);
+    }
+  };
+
+  const copyDiagnosticLog = async () => {
+    const mainLog = window.desktopAPI?.system ? await getDiagnosticLog({ updateStatus, healthReport }) : '';
+    const content = [
+      `Video Flow ${updateStatus.currentVersion || 'unknown'}`,
+      `Update: ${updateStatus.status} (${updateStatus.channel || 'unknown'})`,
+      mainLog,
+      'Renderer logs:',
+      getRendererDiagnosticLog(),
+    ].filter(Boolean).join('\n\n');
+    await navigator.clipboard?.writeText(content);
+    setStatus('Đã copy diagnostic log');
   };
 
   const renderAllScenes = async () => {
@@ -254,7 +390,7 @@ function FlowEditor() {
       return;
     }
 
-    setStatus('Đang render tất cả scene...');
+    setStatus('Đang render tất cả cảnh...');
     for (const sceneNode of sceneNodes) {
       const sceneIndex = Number((sceneNode.data as any).sceneIndex || 0);
       const shot = shots.length > 0 ? shots[sceneIndex % shots.length] : null;
@@ -294,11 +430,21 @@ function FlowEditor() {
         });
         setNodes((current) => current.map((node) => node.id === sceneNode.id ? { ...node, data: { ...node.data, status: 'done', mediaId: result.mediaId, base64: result.base64, filePath: result.filePath } } : node));
       } catch (error) {
+        log('error', 'render', error);
         setNodes((current) => current.map((node) => node.id === sceneNode.id ? { ...node, data: { ...node.data, status: 'error', error: error instanceof Error ? error.message : 'Render thất bại' } } : node));
       }
     }
-    setStatus('Đã hoàn tất lệnh render tất cả scene');
+    setStatus('Đã hoàn tất render tất cả cảnh');
   };
+
+  if (!onboardingComplete) {
+    return (
+      <OnboardingShell
+        onComplete={() => setOnboardingComplete(true)}
+        onOpenSettings={() => setSettingsOpen(true)}
+      />
+    );
+  }
 
   return (
     <div className="app-shell">
@@ -314,14 +460,28 @@ function FlowEditor() {
             <span>{providerStatus.label}</span>
           </div>
           <div className="topbar-actions">
-            <button className="toolbar-button accent" onClick={openSettings} title="Cấu hình API" type="button">
+            {authStatus.status === 'authenticated' && (
+              <div className="user-chip" title={authStatus.profile?.email || ''}>
+                {authStatus.profile?.picture ? <img src={authStatus.profile.picture} alt="" /> : <span>{authStatus.profile?.name?.slice(0, 1) || 'U'}</span>}
+                <strong>{authStatus.profile?.name || authStatus.profile?.email}</strong>
+              </div>
+            )}
+            <button className="toolbar-button accent" onClick={openSettings} title="Cấu hình nhà cung cấp" type="button">
               <KeyRound size={17} />
-              <span>Cấu hình API</span>
+              <span>Provider</span>
             </button>
             <UpdateStatusButton status={updateStatus} onClick={runUpdateCheck} />
-            <button className="toolbar-button ghost" onClick={renderAllScenes} title="Render tất cả scene theo workflow" type="button">
+            <button className="toolbar-button" onClick={runSystemHealthCheck} title="Kiểm tra hệ thống" type="button">
+              <Activity size={17} />
+              <span>Health Check</span>
+            </button>
+            <button className="toolbar-button" onClick={() => setCloudModalOpen(true)} title="Workflow Cloud" type="button">
+              <Cloud size={17} />
+              <span>Cloud</span>
+            </button>
+            <button className="toolbar-button primary-command" onClick={renderAllScenes} title="Render tất cả cảnh" type="button">
               <PlayCircle size={17} />
-              <span>Render tất cả</span>
+              <span>Render tất cả cảnh</span>
             </button>
             <button className="toolbar-button" onClick={openWorkflow} title="Mở workflow" type="button">
               <FolderOpen size={17} />
@@ -334,6 +494,11 @@ function FlowEditor() {
             <button className="toolbar-button ghost" onClick={resetWorkflow} title="Reset workflow" type="button">
               <RotateCcw size={17} />
             </button>
+            {authStatus.status === 'authenticated' && (
+              <button className="toolbar-button ghost" onClick={runLogout} title="Đăng xuất" type="button">
+                <LogOut size={17} />
+              </button>
+            )}
           </div>
         </div>
 
@@ -371,6 +536,24 @@ function FlowEditor() {
         onCheck={runUpdateCheck}
         onDownload={runUpdateDownload}
         onInstall={runUpdateInstall}
+        onCopyDiagnostics={copyDiagnosticLog}
+      />
+      <SystemHealthModal
+        open={healthModalOpen}
+        loading={healthLoading}
+        report={healthReport}
+        onClose={() => setHealthModalOpen(false)}
+        onRun={runSystemHealthCheck}
+        onCopyDiagnostics={copyDiagnosticLog}
+      />
+      <CloudWorkflowModal
+        open={cloudModalOpen}
+        loading={cloudLoading}
+        workflows={cloudWorkflows}
+        onClose={() => setCloudModalOpen(false)}
+        onRefresh={refreshCloudWorkflows}
+        onSave={saveCloudWorkflow}
+        onOpenWorkflow={openCloudWorkflow}
       />
     </div>
   );

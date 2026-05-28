@@ -61,7 +61,7 @@ export const ExportNode = ({ id }: any) => {
 
         <button className="primary-button nodrag" disabled={readyScenes.length === 0 || exporting} onClick={handleDownloadAll} type="button">
           {exporting ? <span className="spinner small" /> : <Download size={16} />}
-          Tải tất cả MP4
+          Xuất MP4
         </button>
       </div>
 

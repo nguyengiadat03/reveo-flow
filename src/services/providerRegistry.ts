@@ -5,9 +5,10 @@ export function getDefaultProvider(providers: VideoProviderDefinition[]): VideoP
 }
 
 export function getProviderStatusLabel(provider: VideoProviderDefinition): string {
-  if (provider.id === 'local-ffmpeg') return 'Sẵn sàng render';
+  if (provider.id === 'local-ffmpeg') return 'Mock Only';
   if (provider.lastTestStatus === 'ok') return 'Kết nối OK';
   if (provider.lastTestStatus === 'error') return 'Lỗi kết nối';
-  if (provider.configured) return 'Đã cấu hình';
-  return 'Chưa cấu hình';
+  if (!provider.implemented) return 'Chưa hỗ trợ chính thức';
+  if (provider.configured) return 'Ready';
+  return provider.requiresApiKey ? 'Missing API Key' : 'Ready';
 }

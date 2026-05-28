@@ -1,4 +1,4 @@
-import type { UpdateStatus } from '../types/update';
+import type { UpdateDiagnostics, UpdateStatus } from '../types/update';
 
 function updateApi() {
   if (!window.desktopAPI?.update) {
@@ -21,6 +21,10 @@ export async function installUpdate(): Promise<UpdateStatus> {
 
 export async function getUpdateStatus(): Promise<UpdateStatus> {
   return updateApi().getUpdateStatus();
+}
+
+export async function getUpdateDiagnostics(): Promise<UpdateDiagnostics> {
+  return updateApi().getDiagnostics();
 }
 
 export function onUpdateStatus(callback: (status: UpdateStatus) => void): () => void {

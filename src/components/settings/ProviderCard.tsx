@@ -34,6 +34,11 @@ export const ProviderCard: React.FC<ProviderCardProps> = ({ provider, onChanged 
   const selectedModelName = useMemo(() => {
     return provider.models.find((model) => model.id === modelName)?.name || modelName || 'Default';
   }, [provider.models, modelName]);
+  const actionHint = provider.id === 'local-ffmpeg'
+    ? 'Không cần credits'
+    : provider.implemented
+      ? 'Cần API key/provider billing'
+      : 'Chờ API chính thức';
 
   const runAction = async (kind: typeof busy, action: () => Promise<unknown>) => {
     setBusy(kind);
@@ -77,7 +82,7 @@ export const ProviderCard: React.FC<ProviderCardProps> = ({ provider, onChanged 
         </div>
         <div className="provider-title">
           <strong>{provider.name}</strong>
-          <span>{provider.statusLabel}</span>
+          <span>{actionHint}</span>
         </div>
         <div className="provider-status">
           {provider.lastTestStatus === 'ok' ? <CheckCircle2 size={16} /> : provider.lastTestStatus === 'error' ? <XCircle size={16} /> : <ShieldCheck size={16} />}
@@ -86,8 +91,8 @@ export const ProviderCard: React.FC<ProviderCardProps> = ({ provider, onChanged 
       </div>
 
       <div className="provider-meta-row">
-        <span>{provider.requiresApiKey ? 'Yêu cầu khóa API' : 'Không cần khóa API'}</span>
-        <span>{provider.implemented ? 'Có thể render' : 'Adapter chờ API chính thức'}</span>
+        <span>{provider.requiresApiKey ? 'Cần API key' : 'Không cần key'}</span>
+        <span>{provider.implemented ? 'Render thật' : 'Chưa hỗ trợ'}</span>
         <span>{provider.isDefault ? 'Mặc định' : selectedModelName}</span>
       </div>
 

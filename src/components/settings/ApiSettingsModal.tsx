@@ -66,13 +66,18 @@ export const ApiSettingsModal: React.FC<ApiSettingsModalProps> = ({ open, onClos
 
         <div className="security-notice">
           <LockKeyhole size={18} />
-          <span>API keys được lưu cục bộ và chỉ backend desktop sử dụng. Workflow JSON không lưu secret.</span>
+          <span>Key lưu cục bộ trong Electron. Workflow không lưu secret.</span>
+        </div>
+
+        <div className="provider-guidance">
+          <strong>Credits & provider</strong>
+          <span>Local FFmpeg không cần credits. Gemini/Veo cần API key hợp lệ. Google Flow credits chưa có API bên thứ ba được xác nhận.</span>
         </div>
 
         <div className="settings-tabs">
           {[
             ['all', 'Tất cả'],
-            ['configured', 'Đã cấu hình'],
+            ['configured', 'Ready'],
             ['local', 'Local'],
             ['ai-video', 'AI Video'],
           ].map(([id, label]) => (

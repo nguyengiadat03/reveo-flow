@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlertTriangle, DownloadCloud, Loader2, RotateCcw, ShieldCheck, X } from 'lucide-react';
+import { AlertTriangle, ClipboardCopy, DownloadCloud, Loader2, RotateCcw, ShieldCheck, X } from 'lucide-react';
 import type { UpdateStatus } from '../../types/update';
 
 interface UpdateModalProps {
@@ -9,6 +9,7 @@ interface UpdateModalProps {
   onCheck: () => void;
   onDownload: () => void;
   onInstall: () => void;
+  onCopyDiagnostics: () => void;
 }
 
 function title(status: UpdateStatus): string {
@@ -42,7 +43,7 @@ function icon(status: UpdateStatus) {
   return <ShieldCheck size={22} />;
 }
 
-export const UpdateModal: React.FC<UpdateModalProps> = ({ open, status, onClose, onCheck, onDownload, onInstall }) => {
+export const UpdateModal: React.FC<UpdateModalProps> = ({ open, status, onClose, onCheck, onDownload, onInstall, onCopyDiagnostics }) => {
   if (!open) return null;
 
   const busy = status.status === 'checking' || status.status === 'downloading';
@@ -79,6 +80,14 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ open, status, onClose,
               <strong>{status.latestVersion}</strong>
             </div>
           )}
+          <div className="update-diagnostics-grid">
+            <span>Kênh cập nhật</span>
+            <strong>{status.channel || 'GitHub Releases'}</strong>
+            <span>Trạng thái</span>
+            <strong>{status.status}</strong>
+            <span>Portable</span>
+            <strong>{status.isPortable ? 'Có' : 'Không'}</strong>
+          </div>
 
           {status.status === 'downloading' && (
             <div className="update-progress">
@@ -108,6 +117,10 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ open, status, onClose,
           )}
           <button className="secondary-action" onClick={onClose} disabled={status.status === 'downloading'} type="button">
             Để sau
+          </button>
+          <button className="secondary-action" onClick={onCopyDiagnostics} type="button">
+            <ClipboardCopy size={16} />
+            Copy diagnostic log
           </button>
         </footer>
       </div>

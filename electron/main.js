@@ -2,11 +2,17 @@ const { app, BrowserWindow, dialog, ipcMain } = require('electron');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { registerApiSettingsHandlers } = require('./ipc/apiSettingsHandlers');
+const { registerAuthHandlers } = require('./ipc/authHandlers');
+const { registerCloudHandlers } = require('./ipc/cloudHandlers');
+const { registerSystemHandlers } = require('./ipc/systemHandlers');
 const { registerUpdateHandlers } = require('./ipc/updateHandlers');
 const { registerVideoRenderHandlers } = require('./ipc/videoRenderHandlers');
+const logger = require('./services/logger');
 const updateService = require('./services/updateService');
 
 const isDev = !app.isPackaged;
+const deepLinkProtocol = String(process.env.APP_DEEP_LINK_PROTOCOL || 'flowgraph').replace('://', '').replace(':', '');
+let mainWindow = null;
 
 const mimeTypes = {
   '.apng': 'image/apng',
@@ -26,6 +32,80 @@ const mimeTypes = {
   '.webm': 'video/webm',
   '.mov': 'video/quicktime'
 };
+
+function safeLogMessage(error) {
+  return logger.redact(String(error?.message || error || 'Unknown error'));
+}
+
+process.on('unhandledRejection', (error) => {
+  logger.error('app', 'Unhandled promise rejection', safeLogMessage(error));
+});
+
+process.on('uncaughtException', (error) => {
+  logger.error('app', 'Uncaught exception', safeLogMessage(error));
+});
+
+app.on('render-process-gone', (_event, webContents, details) => {
+  logger.error('app', 'Renderer process gone', {
+    reason: details?.reason,
+    exitCode: details?.exitCode,
+    url: webContents?.getURL?.()
+  });
+});
+
+app.on('child-process-gone', (_event, details) => {
+  logger.error('app', 'Child process gone', {
+    type: details?.type,
+    reason: details?.reason,
+    exitCode: details?.exitCode
+  });
+});
+
+function registerDeepLinkProtocol() {
+  if (process.defaultApp && process.argv.length >= 2) {
+    app.setAsDefaultProtocolClient(deepLinkProtocol, process.execPath, [path.resolve(process.argv[1])]);
+    return;
+  }
+  app.setAsDefaultProtocolClient(deepLinkProtocol);
+}
+
+function findDeepLinkArg(argv = []) {
+  return argv.find((value) => typeof value === 'string' && value.startsWith(`${deepLinkProtocol}://`));
+}
+
+async function handleDeepLink(url) {
+  if (!url || !url.startsWith(`${deepLinkProtocol}://`)) return;
+  logger.info('auth', 'Received auth deep link.');
+  try {
+    const status = await require('./services/auth/googleAuthService').handleCallback(url);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.show();
+      mainWindow.focus();
+      mainWindow.webContents.send('auth:statusChanged', status);
+    }
+  } catch (error) {
+    logger.error('auth', 'Failed to handle auth deep link.', error);
+  }
+}
+
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on('second-instance', (_event, argv) => {
+    const deepLink = findDeepLinkArg(argv);
+    if (deepLink) void handleDeepLink(deepLink);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
+}
+
+app.on('open-url', (event, url) => {
+  event.preventDefault();
+  void handleDeepLink(url);
+});
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -50,13 +130,21 @@ function createWindow() {
     win.loadFile(path.join(__dirname, '../dist/index.html'));
   }
 
+  mainWindow = win;
+  win.on('closed', () => {
+    if (mainWindow === win) mainWindow = null;
+  });
+
   return win;
 }
 
 app.whenReady().then(() => {
+  registerDeepLinkProtocol();
   registerIpc();
-  const mainWindow = createWindow();
-  updateService.initAutoUpdater(mainWindow);
+  const window = createWindow();
+  updateService.initAutoUpdater(window);
+  const initialDeepLink = findDeepLinkArg(process.argv);
+  if (initialDeepLink) void handleDeepLink(initialDeepLink);
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -81,6 +169,9 @@ function getMediaFilters(filter) {
 
 function registerIpc() {
   registerApiSettingsHandlers(ipcMain);
+  registerAuthHandlers(ipcMain, () => mainWindow);
+  registerCloudHandlers(ipcMain);
+  registerSystemHandlers(ipcMain);
   registerUpdateHandlers(ipcMain);
   registerVideoRenderHandlers(ipcMain);
 

@@ -25,10 +25,29 @@ const providerDefinitions = [
     supportsAudioReference: false,
     supportsAspectRatio: true,
     supportsDuration: true,
-    implemented: false,
-    statusLabel: 'Chưa nối SDK/API chính thức trong app này',
+    implemented: true,
+    statusLabel: 'Dùng Gemini API chính thức để tạo video Veo',
     models: [
-      { id: 'veo-default', name: 'Veo default' }
+      { id: 'veo-3.1-generate-preview', name: 'Veo 3.1 Preview' },
+      { id: 'veo-3.1-fast-generate-preview', name: 'Veo 3.1 Fast Preview' },
+      { id: 'veo-3.0-generate-001', name: 'Veo 3' },
+      { id: 'veo-3.0-fast-generate-001', name: 'Veo 3 Fast' }
+    ]
+  },
+  {
+    id: 'google-flow',
+    name: 'Google Flow',
+    shortName: 'Google Flow',
+    category: 'ai-video',
+    requiresApiKey: false,
+    supportsImageReference: true,
+    supportsAudioReference: true,
+    supportsAspectRatio: true,
+    supportsDuration: true,
+    implemented: false,
+    statusLabel: 'Chưa có API chính thức để dùng credits qua app bên thứ ba',
+    models: [
+      { id: 'google-flow-official-api-unavailable', name: 'Official API unavailable' }
     ]
   },
   {

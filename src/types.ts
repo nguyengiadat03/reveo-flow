@@ -1,4 +1,7 @@
 import type { Edge, Node } from '@xyflow/react';
+import type { AuthStatus } from './types/auth';
+import type { HealthCheckReport } from './types/health';
+import type { UpdateDiagnostics } from './types/update';
 import type { UpdateStatus } from './types/update';
 
 export type NodeType =
@@ -107,13 +110,36 @@ export interface DesktopAPI {
   removeProviderKey: (providerId: string) => Promise<any>;
   testProviderConnection: (options: unknown) => Promise<any>;
   setDefaultProvider: (providerId: string) => Promise<string>;
+  auth: {
+    getStatus: () => Promise<AuthStatus>;
+    loginGoogle: (options?: unknown) => Promise<AuthStatus>;
+    handleCallback: (url: string) => Promise<AuthStatus>;
+    logout: () => Promise<AuthStatus>;
+    refresh: () => Promise<AuthStatus>;
+    getCurrentUser: () => Promise<AuthStatus>;
+    getProviderCapabilities: () => Promise<AuthStatus['capabilities']>;
+    onStatusChanged: (callback: (status: AuthStatus) => void) => () => void;
+  };
+  cloud: {
+    ensureProfile: () => Promise<any>;
+    listWorkflows: () => Promise<any[]>;
+    saveWorkflow: (input: unknown) => Promise<any>;
+    getWorkflow: (workflowId: string) => Promise<any>;
+    createRenderJob: (input: unknown) => Promise<any>;
+  };
   update: {
     checkForUpdates: () => Promise<UpdateStatus>;
     downloadUpdate: () => Promise<UpdateStatus>;
     installUpdate: () => Promise<UpdateStatus>;
     getUpdateStatus: () => Promise<UpdateStatus>;
+    getDiagnostics: () => Promise<UpdateDiagnostics>;
     setBlocked: (reason: string) => Promise<UpdateStatus>;
     clearBlocked: () => Promise<UpdateStatus>;
     onUpdateStatus: (callback: (status: UpdateStatus) => void) => () => void;
+  };
+  system: {
+    runHealthCheck: (input?: unknown) => Promise<HealthCheckReport>;
+    getDiagnosticLog: (extra?: unknown) => Promise<string>;
+    restartApp: () => Promise<void>;
   };
 }

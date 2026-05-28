@@ -65,7 +65,7 @@ export const WorkflowSidebar: React.FC<SidebarProps> = ({ onAddNode, onOpenSetti
           );
         })}
 
-        <span className="sidebar-label">AI Generate</span>
+        <span className="sidebar-label">Generate</span>
         {NODE_TYPES.filter((node) => ['script', 'scene'].includes(node.type)).map((node) => {
           const Icon = node.icon;
           return (
@@ -102,9 +102,9 @@ export const WorkflowSidebar: React.FC<SidebarProps> = ({ onAddNode, onOpenSetti
         })}
 
         <span className="sidebar-label">Settings</span>
-        <button className="sidebar-button" data-tone="cyan" onClick={onOpenSettings} title="Cấu hình API" type="button">
+        <button className="sidebar-button" data-tone="cyan" onClick={onOpenSettings} title="Cấu hình nhà cung cấp" type="button">
           <KeyRound size={19} />
-          <span>Cấu hình API</span>
+          <span>Provider</span>
         </button>
       </div>
     </aside>

@@ -84,7 +84,7 @@ export const CharacterNode = ({ id, data }: any) => {
 
         <button className="primary-button nodrag" disabled={loading} onClick={generateCharacter} type="button">
           <Sparkles size={16} />
-          Tạo AI
+          Tạo phác thảo
         </button>
       </div>
       <Handle type="source" position={Position.Right} className="flow-handle output orange" />

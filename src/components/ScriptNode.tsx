@@ -131,7 +131,7 @@ export const ScriptNode = ({ id, data }: any) => {
 
         <button className="primary-button nodrag" disabled={loading} onClick={generateShots} type="button">
           {loading ? <span className="spinner small" /> : <Sparkles size={16} />}
-          Tạo phân cảnh AI
+          Tạo phân cảnh
         </button>
 
         <div className="shot-list">
