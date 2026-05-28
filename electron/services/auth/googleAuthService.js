@@ -278,8 +278,10 @@ async function handleCallback(callbackUrl) {
     const url = new URL(callbackUrl);
     const error = url.searchParams.get('error') || url.searchParams.get('error_description');
     const code = url.searchParams.get('code');
+    const state = url.searchParams.get('state');
     if (error) throw new Error(error);
     if (!code) throw new Error('OAuth callback thiếu code.');
+    if (state !== pendingAuth.state) throw new Error('OAuth callback state không hợp lệ.');
 
     const session = await exchangeSupabaseCode(pendingAuth.config, code, pendingAuth.verifier);
     if (!session?.access_token || !session?.user) throw new Error('Supabase không trả về session hợp lệ.');

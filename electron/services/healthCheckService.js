@@ -6,6 +6,8 @@ const ffmpegPath = require('ffmpeg-static');
 const packageJson = require('../../package.json');
 const apiKeyStore = require('./apiKeyStore');
 const { listProviderDefinitions } = require('./providerRegistry');
+const tokenStore = require('./auth/tokenStore');
+const supabaseService = require('./supabaseService');
 const updateService = require('./updateService');
 const logger = require('./logger');
 
@@ -71,6 +73,43 @@ function validateWorkflow(summary = {}) {
   return checks;
 }
 
+function validateSupabaseConfig(input = {}) {
+  const config = input.supabaseConfig || {};
+  const supabaseUrl = String(config.url || process.env.VITE_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '');
+  const anonKey = String(config.anonKey || process.env.VITE_SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_ANON_KEY || '');
+  const protocol = String(config.protocol || process.env.APP_DEEP_LINK_PROTOCOL || process.env.VITE_APP_DEEP_LINK_PROTOCOL || 'flowgraph').replace('://', '').replace(':', '');
+  const checks = [];
+
+  checks.push(check(
+    'supabase-url',
+    'Supabase/Auth',
+    'Supabase URL',
+    /^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(supabaseUrl) || /^http:\/\/(127\.0\.0\.1|localhost):/i.test(supabaseUrl) ? 'pass' : 'fail',
+    supabaseUrl ? `Đã cấu hình ${supabaseUrl}` : 'Thiếu Supabase URL.',
+    'Thiết lập VITE_SUPABASE_URL trong .env.local hoặc biến môi trường build.'
+  ));
+
+  checks.push(check(
+    'supabase-anon-key',
+    'Supabase/Auth',
+    'Supabase anon/publishable key',
+    anonKey ? 'pass' : 'fail',
+    anonKey ? 'Đã cấu hình public anon/publishable key.' : 'Thiếu VITE_SUPABASE_ANON_KEY.',
+    'Thiết lập VITE_SUPABASE_ANON_KEY. Không dùng service_role trong app desktop.'
+  ));
+
+  checks.push(check(
+    'auth-protocol',
+    'Supabase/Auth',
+    'Custom protocol',
+    protocol ? 'pass' : 'fail',
+    protocol ? `Protocol: ${protocol}://auth/callback` : 'Thiếu APP_DEEP_LINK_PROTOCOL.',
+    'Dùng flowgraph và thêm redirect URL flowgraph://auth/callback trong Supabase.'
+  ));
+
+  return checks;
+}
+
 async function runHealthCheck(input = {}) {
   const startedAt = Date.now();
   const checks = [];
@@ -80,6 +119,15 @@ async function runHealthCheck(input = {}) {
   checks.push(check('runtime-electron', 'App Runtime', 'Electron runtime', 'pass', `Electron ${process.versions.electron || 'unknown'}`));
   checks.push(check('runtime-mode', 'App Runtime', 'Packaged/dev mode', app.isPackaged ? 'pass' : 'warning', app.isPackaged ? 'Đang chạy bản packaged.' : 'Đang chạy dev mode.'));
   checks.push(check('runtime-os', 'App Runtime', 'Hệ điều hành', 'pass', `${process.platform} ${process.arch}`));
+  checks.push(...validateSupabaseConfig(input));
+  checks.push(check(
+    'auth-protocol-registration',
+    'Supabase/Auth',
+    'Protocol registration',
+    app.isDefaultProtocolClient('flowgraph') ? 'pass' : 'warning',
+    app.isDefaultProtocolClient('flowgraph') ? 'flowgraph:// đã được đăng ký cho app này.' : 'Không xác nhận được flowgraph:// là default protocol client.',
+    'Mở app packaged một lần hoặc cài installer để đăng ký protocol trên Windows.'
+  ));
 
   const updateStatus = updateService.getUpdateStatus();
   const publishConfig = packageJson.build?.publish?.[0];
@@ -132,7 +180,32 @@ async function runHealthCheck(input = {}) {
   }
 
   checks.push(...validateWorkflow(input.workflow));
-  checks.push(check('auth-status', 'Auth', 'Trạng thái đăng nhập', 'skipped', 'Health check không yêu cầu đăng nhập để render local.'));
+
+  try {
+    const session = await tokenStore.getSupabaseSession();
+    checks.push(check(
+      'auth-status',
+      'Supabase/Auth',
+      'Trạng thái đăng nhập',
+      session?.profile ? 'pass' : 'warning',
+      session?.profile ? `Đã đăng nhập: ${session.profile.email || session.profile.name}` : 'Chưa có Supabase session. Local mode vẫn hoạt động.',
+      'Đăng nhập Google nếu cần Workflow Cloud.'
+    ));
+
+    if (session?.profile) {
+      try {
+        await supabaseService.ensureProfile();
+        checks.push(check('cloud-profile-sync', 'Cloud Sync', 'Profile/workspace sync', 'pass', 'Có thể đồng bộ profile/workspace với Supabase.'));
+      } catch (error) {
+        checks.push(check('cloud-profile-sync', 'Cloud Sync', 'Profile/workspace sync', 'fail', error.message, 'Kiểm tra migration, RLS và Supabase session.'));
+      }
+    } else {
+      checks.push(check('cloud-profile-sync', 'Cloud Sync', 'Profile/workspace sync', 'skipped', 'Bỏ qua vì chưa đăng nhập.'));
+    }
+  } catch (error) {
+    checks.push(check('auth-status', 'Supabase/Auth', 'Trạng thái đăng nhập', 'fail', error.message, 'Kiểm tra tokenStore hoặc đăng nhập lại.'));
+  }
+
   checks.push(check('render-queue', 'Render Queue', 'Job render', updateStatus.blockedReason ? 'warning' : 'pass', updateStatus.blockedReason || 'Không có job render đang chặn cập nhật.'));
   checks.push(check('logs-errors', 'Logs', 'Lỗi nghiêm trọng gần đây', logger.getLogs().some((entry) => entry.level === 'error') ? 'warning' : 'pass', logger.getLogs().some((entry) => entry.level === 'error') ? 'Có lỗi trong diagnostic log.' : 'Không ghi nhận lỗi nghiêm trọng trong phiên hiện tại.'));
 

@@ -46,6 +46,7 @@ import {
 import { getDiagnosticLog, runHealthCheck } from './services/systemClient';
 import { getRendererDiagnosticLog, log } from './services/logger';
 import { getAuthStatus, logout, onAuthStatusChanged } from './services/authClient';
+import { getSupabasePublicConfig } from './services/supabaseClient';
 import { listCloudWorkflows, openWorkflowFromCloud, saveWorkflowToCloud } from './services/workflowCloudClient';
 import type { AuthStatus } from './types/auth';
 import type { HealthCheckReport } from './types/health';
@@ -345,7 +346,13 @@ function FlowEditor() {
     setHealthModalOpen(true);
     setHealthLoading(true);
     try {
-      setHealthReport(await runHealthCheck({ workflow: workflowSummary }));
+      setHealthReport(await runHealthCheck({
+        workflow: workflowSummary,
+        supabaseConfig: {
+          ...getSupabasePublicConfig(),
+          protocol: import.meta.env.VITE_APP_DEEP_LINK_PROTOCOL || 'flowgraph',
+        },
+      }));
     } catch (error) {
       log('error', 'health', error);
       setHealthReport({
