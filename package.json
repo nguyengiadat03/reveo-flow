@@ -16,7 +16,12 @@
     "dist": "npm run build && electron-builder --win nsis",
     "dist:portable": "npm run build && electron-builder --win portable",
     "publish:win": "npm run build && electron-builder --win nsis --publish always",
-    "release:win": "npm run dist"
+    "release:win": "npm run dist",
+    "supabase:start": "supabase start",
+    "supabase:stop": "supabase stop",
+    "supabase:reset": "supabase db reset",
+    "supabase:status": "supabase status",
+    "supabase:push": "supabase db push"
   },
   "dependencies": {
     "@xyflow/react": "^12.8.4",
@@ -34,6 +39,7 @@
     "concurrently": "^9.1.2",
     "electron": "^33.4.11",
     "electron-builder": "^25.1.8",
+    "supabase": "^2.101.0",
     "typescript": "^5.7.2",
     "vite": "^6.0.5",
     "wait-on": "^8.0.1"
