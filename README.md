@@ -178,4 +178,4 @@ reveo-flow/
 
 ## Tác giả
 
-Phát triển bởi **Rocket Global**.
+Phát triển bởi **Nguyễn Gia Đạt**.
